@@ -1,6 +1,6 @@
 script_name('Telegram Control SAMP')
 script_author('vespan')
-script_version(5.12)
+script_version(6.2)
 
 require 'moonloader'
 local libs = {
@@ -29,19 +29,6 @@ write the command {294a7a}/tcs_libs{cccccc} to open the link <SA:MP setup>(libra
 end
 
 encoding.default = 'CP1251'; u8 = encoding.UTF8  
-function json(filePath)
-    local class = {}
-        function class.save(tbl)
-        if tbl then local F = io.open(filePath, 'w');    F:write(encodeJson(tbl) or {});    F:close();    return true, 'ok' end
-        return false, 'table = nil'
-    end
-    function class.load(defaultTable)
-        if not doesFileExist(filePath) then;    class.save(defaultTable or {});    end
-        local F = io.open(filePath, 'r+');    local TABLE = decodeJson(F:read() or {}); F:close()
-        for def_k, def_v in pairs(defaultTable) do;  if TABLE[def_k] == nil then;   TABLE[def_k] = def_v;   end;    end
-        return TABLE
-    end; return class
-end
 json = {
     defPath = getWorkingDirectory()..'/config/',
     save = function(t,path) 
@@ -57,6 +44,7 @@ json = {
     end
 }
 if not doesDirectoryExist(getWorkingDirectory()..'/config/') then createDirectory(getWorkingDirectory()..'/config/') end
+createDirectory(getWorkingDirectory()..'/config/Telegram Control SAMP exports/')
 j = json.load({
     notf = false,
     token = '123456789:token',
@@ -112,7 +100,7 @@ end)
         },
         {
             name = 'get info',
-            cmd = '/ss',
+            cmd = '/gi',
             act = [[
 local ip,port = sampGetCurrentServerAddress()
 sendTelegramNotification(
@@ -146,7 +134,7 @@ function s();   json.save(j,'Telegram Control SAMP.json');  end
 
 menu = ''
 
-window = imgui.ImBool(true)
+window = imgui.ImBool(false)
 token,id,notf = imgui.ImBuffer(j.token,256), imgui.ImBuffer(j.id,15), imgui.ImBool(j.notf)
 
 hooks = {}
@@ -220,13 +208,14 @@ moonloader_reference = {
 function main()
     while not isSampAvailable() do wait(0) end
 
-    sampRegisterChatCommand('tcs',function() window.v = not window.v end)
-
     downloadUrlToFile(
         'https://raw.githubusercontent.com/v3sp4n/Lua/master/moonloader_reference.txt',
         getWorkingDirectory()..'/lib/moonloader_reference.txt',
         function(_,s)
             if s == 58 then
+                if select(1,pcall(function() return io.open(getWorkingDirectory()..'/lib/moonloader_reference.txt','r+') end)) == false then
+                    goto PCALL_ERROR_IO_OPEN
+                end
                 local f = io.open(getWorkingDirectory()..'/lib/moonloader_reference.txt','r+')
                 for l in f:read('*a'):gmatch('[^\n]+') do
                     if (l:find('^%S+%(') or l:find('^.+%s+%=%s+%S+%(')) then
@@ -235,9 +224,13 @@ function main()
                 end
                 f:close()
                 table.insert(moonloader_reference.reference,'sendTelegramNotification(str)')
+                ::PCALL_ERROR_IO_OPEN::
             end
         end
     )
+
+
+    sampRegisterChatCommand('tcs',function() window.v = not window.v end)
 
     lua_thread.create(function()
         local update = 0
@@ -254,25 +247,19 @@ function main()
                         update = t.result[1].message.date
                         if tostring(t.result[1].message.from.id) ~= id.v then
                             invalid_chat_id = true
+                            sampAddChatMessage("{8E0700}Message received is not from your ID!Username @"..t.result[1].message.from.username)
                         else
                             process_messages(u8:decode(t.result[1].message.text))
                         end
                     end
                     
-                    get = true
                 end
+                get = true
             end,nil)
             while not get do wait(0) end
-            if invalid_chat_id then
-                sampAddChatMessage("{D21C1C}ѕолучено сообщение не от вашего чат-айди! {cccccc}ѕолучение следующего сообщени€ через минуту..")
-                wait(60000)
-            end
 
         end
     end)
-
-    local b = (50 >= 70 and true or false)
-    print(b)
 
     wait(-1)
 end
@@ -298,8 +285,9 @@ function imgui.OnDrawFrame()
         if #menu == 0 then menu = menus[1] end
 
         imgui.BeginChild('menu',imgui.ImVec2(170,-1),true)
-        imgui.SetCursorPosX(37)
+        imgui.SetCursorPosX(35)
         if imgui.Checkbox('notifications',notf) then j.notf = notf.v s() end
+        imgui.TextQuestion('/notf')
         for k,v in ipairs(menus) do
             if imgui.AnimButton(u8(v),imgui.ImVec2(170,78),imgui.ImVec4(0.06, 0.53, 0.98, 1.00),2.3) then menu = v end
         end
@@ -397,15 +385,19 @@ function imgui.OnDrawFrame()
 ),
                 })
             end
+            imgui.SameLine()
+            if imgui.Button('import') then imgui.OpenPopup('import event or command') end
+
             for k,v in pairs(j.commands) do
                 if imgui.CollapsingHeader(u8(v.name)) then
                     local cmd = imgui.ImBuffer(u8(v.cmd),20)
 
                     if imgui.Button('rename command##'..k) then imgui.OpenPopup('rename command '..k) end
-                    imgui.SameLine(nil,123)
+                    imgui.SameLine()
                     if imgui.Button('act##'..k) then imgui.OpenPopup('act '..k) end
-                    -- imgui.SetCursorPosX(imgui.GetWindowWidth()/2 - imgui.CalcTextSize('act').x/2 - 5)
-                    imgui.SameLine(nil,70)
+                    imgui.SameLine()
+                    if imgui.Button('export##'..k) then export_import(v) end
+                    imgui.SameLine(nil,125)
                     if imgui.Button('remove command##'..k) then table.remove(j.commands,k) s() end
 
                     imgui.PushItemWidth(150)
@@ -471,7 +463,7 @@ function imgui.OnDrawFrame()
                             act = ([[
 --returns information about %s
 local res, r = sendTelegramNotification(
-    "%s"
+    %s
     -- "TRIGGER! > {regular}"
 )
 lua_thread.create(function()
@@ -479,7 +471,7 @@ lua_thread.create(function()
     -- sampProcessChatInput('/q') -- exit game by /q
     -- callFunction(0x823BDB , 3, 3, 0, 0, 0) -- crash game
 end)
--- if {regular} == false/.. then ..
+-- if {regular} == false.. then ..
 -- MY_NICK return your nick_name
 -- MY_ID return your server id
 -- MYPOS return your coordinates {x,y,z} (MYPOS[1] return x)
@@ -498,14 +490,18 @@ end)
                 imgui.RadioButton(v,events.imguiInt,k-1) 
                 if k ~= 3 then imgui.SameLine() end
             end
+            imgui.SameLine()
+            if imgui.Button('import') then imgui.OpenPopup('import event or command') end
 
             for k,v in ipairs(j.events) do
                 if imgui.CollapsingHeader(('%s [%s]%s##%s'):format(u8(v.name),v.rpc,v.namerpc,k)) then
-                    if imgui.Button('rename event##'..k) then imgui.OpenPopup('rename event '..k) end
-                    imgui.SameLine(nil,123)
-                    if imgui.Button('act##'..k) then imgui.OpenPopup('act '..k) end
                     -- imgui.SetCursorPosX(imgui.GetWindowWidth()/2 - imgui.CalcTextSize('act').x/2 - 5)
-                    imgui.SameLine(nil,50)
+                    if imgui.Button('rename event##'..k) then imgui.OpenPopup('rename event '..k) end
+                    imgui.SameLine()
+                    if imgui.Button('act##'..k) then imgui.OpenPopup('act '..k) end
+                    imgui.SameLine()
+                    if imgui.Button('export##'..k) then export_import(v) end
+                    imgui.SameLine(nil,102)
                     if imgui.Button('remove rpc current event##'..k) then table.remove(j.events,k) s() end
                     
                     if v.namerpc == 'CUSTOM' then
@@ -515,7 +511,7 @@ end)
                     imgui.Spacing()
                     --
                     for kk,vv in pairs(v.bs) do
-                        local desc = ('%s(%s)##'):format(vv.desc,vv.bs,kk)
+                        local desc = ('%s(%s)##%s-%s'):format(vv.desc,vv.bs,kk,k)
                         local function IF()
                             local combo = {'OFF','find','==','<=','>='}
                             local int = imgui.ImInt(0)
@@ -526,7 +522,7 @@ end)
                                 imgui.Text('-')
                             else
                                 imgui.PushItemWidth(50)
-                                if imgui.Combo('if##'..kk,int,combo) then vv['IF'] = combo[int.v+1] s() end
+                                if imgui.Combo('if##'..kk..'-'..k,int,combo) then vv['IF'] = combo[int.v+1] s() end
                                 imgui.PopItemWidth(1)
                             end
                         end
@@ -582,6 +578,7 @@ stack traceback:
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
+
                 if imgui.BeginPopup('act '..k) then
                     local act = imgui.ImBuffer(u8(v.act),0xffff)
                     imgui.SetCursorPosX(30)
@@ -646,6 +643,29 @@ stack traceback:
 
             end
 
+
+        end
+
+        if imgui.BeginPopup('import event or command') then
+            imgui.Text('path folder exports moonloader/config/Telegram Control SAMP exports/')
+
+            local Files, SearchHandle, File = {}, findFirstFile(getWorkingDirectory()..'/config/Telegram Control SAMP exports/*.json')
+            table.insert(Files, File)
+            while File do File = findNextFile(SearchHandle) table.insert(Files, File) end
+            -- return Files
+
+            for k,v in pairs(Files) do
+                if imgui.Button(u8(v)..'##'..k) then
+                    local t = export_import(v:gsub('.json$',''))
+                    t.name = '[IMPORT] ' .. t.name
+                    table.insert((t.rpc == nil and j.commands or j.events),t)
+                    s()
+                end
+                imgui.SameLine()
+                if imgui.SmallButton('remove##'..k) then os.remove(getWorkingDirectory()..'/config/Telegram Control SAMP exports/'..v) end
+            end
+
+            imgui.EndPopup()
         end
 
         imgui.EndChild()
@@ -654,6 +674,14 @@ stack traceback:
     end
 
 end
+
+function export_import(v)
+    v = (type(v) == 'string' and {name=v} or v)
+    local path = getWorkingDirectory()..'/config/Telegram Control SAMP exports/'..v.name..'.json'
+    if doesFileExist(path) and v.bs ~= nil then os.remove(path) end
+    return json.load((getn(v) == 1 and {} or v),path)
+end
+
 function EXPORTS.hook(s,f)
     hooks[s] = {c=f}
 end
@@ -668,6 +696,7 @@ function process_messages(text)
         notf.v = not notf.v
         s()
         sendTelegramNotification('notifications ' .. (notf.v and 'on' or 'off'))
+        return
     end
     if not notf.v then sendTelegramNotification('notifications are turned off..') return end
     if cmd == '/help' then
@@ -676,6 +705,7 @@ function process_messages(text)
             table.insert(cmds,v.cmd .. ' - '..v.name)
         end
         sendTelegramNotification(table.concat(cmds, "\n"))
+        return
     end
     for k,v in ipairs(j.commands) do
         if cmd == v.cmd then
@@ -708,23 +738,29 @@ events.process = function(id,bs)
     local read = {}
     for _,V in ipairs(j.events) do
         if (V.rpc == id) then
-            for kk,vv in pairs(V.bs) do
-                read[vv.desc] = sampev.INTERFACE.BitStreamIO.bs_read[vv.bs](bs)
+            if read[id] == nil then
+                read[id] = {}
+                for kk,vv in pairs(V.bs) do
+                    read[id][vv.desc] = sampev.INTERFACE.BitStreamIO.bs_read[vv.bs](bs)
+                    -- read[vv.desc] = sampev.INTERFACE.BitStreamIO.bs_read[vv.bs](bs)
+                end
             end
             --
             local bool,act = true,V.act
             for _,bs in pairs(V.bs) do
-                act = act:gsub('%{'..bs.desc..'%}',read[bs.desc])
-                if not select(1,pcall(function() return IF(bs['IF'],bs.content,read[bs.desc]) end)) then
+                act = act:gsub('%{'..removePattern(bs.desc)..'%}','"'..(read[id][bs.desc])..'"')
+                if not select(1,pcall(function() return IF(bs['IF'],bs.content,read[id][bs.desc]) end)) then
                     print(V.rpc,V.namerpc,'error if ',err)
                     bool = false
                 else
-                    if IF(bs['IF'],bs.content,read[bs.desc]) == false then
+                    if IF(bs['IF'],bs.content,read[id][bs.desc]) == false then
+                        print(V.name,'fail',bs.content,read[id][bs.desc])
                         bool = false
                     end
                 end
             end
             if bool then
+                print(act)
                 local f,err = load(act)
                 if err == nil then
                     f()
@@ -736,8 +772,22 @@ events.process = function(id,bs)
     end
 end
 
+function removePattern(text)
+    local p = {
+        '(',')','{','}','|','<','>','-','.','$','^','[',']'
+    }
+    for k,v in ipairs(p) do
+        text = text:gsub('%'..v,'%%'..v)
+    end
+    return text
+end
+
 function EXPORTS.sendTelegramNotification(text,...);    sendTelegramNotification(text,...); end
-function sendTelegramNotification(text)
+function sendTelegramNotification(...)
+    local text = ''
+    for k,v in pairs({...}) do
+        text = text .. '    ' .. v
+    end
     -- text = ((text):format(...))
     print('sendTelegramNotification',text)
     text = text:gsub(' ', '%+'):gsub('\n', '%%0A')
@@ -767,7 +817,7 @@ function gsubTextByRegulars(args,text)
         local r = {text:match(prev)}
         if r[k] == nil then
             sampAddChatMessage('nil!')
-            return false,("regular expression %s({%s}) #%s\n%s"):format(v.reg,v.orig,k,v.desc),args
+            return false,("not found regular expression %s #%s (%s)\n%s\n%s"):format(v.reg,k,v.orig,v.desc,args),args
         end
         v.result = r[k]
     end
